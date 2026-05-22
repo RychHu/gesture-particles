@@ -51,6 +51,24 @@
         /* 错误提示 */
         #error-toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; background: rgba(220, 38, 38, 0.9); padding: 16px 32px; border-radius: 12px; font-size: 14px; text-align: center; display: none; }
 
+        /* 色彩模式切换按钮 */
+        .mode-toggle-group { display: flex; gap: 6px; }
+        .btn-mode { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.3s; }
+        .btn-mode:hover, .btn-mode:focus-visible, .btn-mode.active { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); outline: none; }
+
+        /* 调色板色块横排 */
+        .palette-strip { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .palette-color-item { position: relative; }
+        .palette-dot { -webkit-appearance: none; appearance: none; width: 34px; height: 34px; border: 2px solid rgba(255,255,255,0.15); border-radius: 50%; cursor: pointer; padding: 0; background: none; transition: transform 0.2s, border-color 0.2s; }
+        .palette-dot:hover { transform: scale(1.15); border-color: #fff; }
+        .palette-dot::-webkit-color-swatch-wrapper { padding: 0; }
+        .palette-dot::-webkit-color-swatch { border-radius: 50%; border: none; }
+
+        /* 调色板增减按钮 */
+        .btn-palette-action { width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .btn-palette-action:hover { background: rgba(255,255,255,0.2); border-color: #fff; }
+        .btn-palette-action:disabled { opacity: 0.3; cursor: not-allowed; }
+
         /* 移动端响应式 */
         @media (max-width: 768px) {
             #ui-panel { top: auto; bottom: 0; right: 0; width: 100%; border-radius: 16px 16px 0 0; padding: 16px; max-height: 45vh; overflow-y: auto; }
@@ -92,7 +110,46 @@
         </div>
 
         <div class="control-group">
-            <label for="particle-color">星尘色彩</label>
+            <label>色彩模式</label>
+            <div class="mode-toggle-group">
+                <button class="btn-mode active" data-mode="rainbow">彩虹</button>
+                <button class="btn-mode" data-mode="palette">调色板</button>
+                <button class="btn-mode" data-mode="single">单色</button>
+            </div>
+        </div>
+
+        <!-- 彩虹模式面板 -->
+        <div class="control-group" id="rainbow-controls">
+            <label for="flow-speed">彩虹流速</label>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="range" id="flow-speed" min="0.02" max="0.5" step="0.01" value="0.15" style="flex: 1; accent-color: #00ffcc;">
+                <span id="flow-speed-val" style="font-size: 13px; color: rgba(255,255,255,0.7); font-family: monospace;">0.15</span>
+            </div>
+        </div>
+
+        <!-- 调色板模式面板（默认隐藏） -->
+        <div class="control-group" id="palette-controls" style="display:none;">
+            <label>调色板颜色</label>
+            <div class="palette-strip" id="palette-strip">
+                <div class="palette-color-item">
+                    <input type="color" class="palette-dot" value="#ff006e" data-index="0">
+                </div>
+                <div class="palette-color-item">
+                    <input type="color" class="palette-dot" value="#ffbe0b" data-index="1">
+                </div>
+                <div class="palette-color-item">
+                    <input type="color" class="palette-dot" value="#00ffcc" data-index="2">
+                </div>
+            </div>
+            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                <button class="btn-palette-action" id="btn-add-color" title="添加颜色">+</button>
+                <button class="btn-palette-action" id="btn-remove-color" title="移除颜色">&minus;</button>
+            </div>
+        </div>
+
+        <!-- 单色模式面板（默认隐藏） -->
+        <div class="control-group" id="single-color-controls" style="display:none;">
+            <label for="particle-color">单色选择</label>
             <div class="color-picker-wrapper">
                 <input type="color" id="particle-color" value="#00ffcc" aria-label="粒子颜色选择">
                 <span id="color-hex" style="font-size: 13px; color: rgba(255,255,255,0.7)">#00ffcc</span>
@@ -136,7 +193,7 @@
 
         // ---- 1. 全局变量与配置 ----
         const clock = new THREE.Clock();
-        let scene, camera, renderer, particleSystem, starField;
+        let scene, camera, renderer, particleSystem, starField, shaderMaterial;
         const PARTICLE_COUNT = (function() {
             const cores = navigator.hardwareConcurrency || 4;
             if (cores <= 2) return 6000;
@@ -152,7 +209,7 @@
         let currentSpread = 0.0;
         let currentRotationAxis = 'X';
         let userSpeedSetting = 0.3;
-        const animSpeedMul = 1.0;
+        const animSpeedMul = 0.09;
 
         // 手势粘滞平滑
         let smoothedFingerLength = 0.3;
@@ -188,6 +245,63 @@
         }
 
         // ---- 2. 初始化 Three.js 环境 ----
+        const VERTEX_SHADER = /* glsl */`
+            uniform float uTime;
+            uniform int uColorMode;
+            uniform vec3 uSingleColor;
+            uniform float uFlowSpeed;
+            uniform float uSize;
+            uniform vec3 uPaletteColors[5];
+            uniform int uPaletteSize;
+
+            attribute float hueOffset;
+            varying vec3 vColor;
+
+            vec3 hsl2rgb(float h, float s, float l) {
+                vec3 rgb = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+                return l + s * (rgb - 0.5) * (1.0 - abs(2.0 * l - 1.0));
+            }
+
+            vec3 samplePalette(float t) {
+                if (uPaletteSize <= 1) return uPaletteColors[0];
+                t = fract(t);
+                float scaledT = t * float(uPaletteSize - 1);
+                int idx = int(floor(scaledT));
+                int nextIdx = min(idx + 1, uPaletteSize - 1);
+                float frac = scaledT - float(idx);
+                return mix(uPaletteColors[idx], uPaletteColors[nextIdx], frac);
+            }
+
+            void main() {
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                gl_Position = projectionMatrix * mvPosition;
+                gl_PointSize = uSize * (300.0 / -mvPosition.z);
+
+                vec3 color;
+                if (uColorMode == 0) {
+                    color = uSingleColor;
+                } else if (uColorMode == 1) {
+                    float hue = fract(hueOffset + uTime * uFlowSpeed);
+                    color = hsl2rgb(hue, 0.85, 0.6);
+                } else {
+                    float t = fract(hueOffset + uTime * uFlowSpeed * 0.6);
+                    color = samplePalette(t);
+                }
+                vColor = color;
+            }
+        `;
+
+        const FRAGMENT_SHADER = /* glsl */`
+            varying vec3 vColor;
+
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float alpha = 1.0 - smoothstep(0.3, 0.95, d);
+                if (alpha < 0.01) discard;
+                gl_FragColor = vec4(vColor * alpha, alpha);
+            }
+        `;
+
         function initThree() {
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
@@ -213,16 +327,37 @@
 
             geometry.setAttribute('position', new THREE.BufferAttribute(currentPositions, 3));
 
-            const material = new THREE.PointsMaterial({
-                size: 0.25,
-                color: 0x00ffcc,
+            // 为每个粒子分配随机色相偏移（0~1），作为粒子的颜色"身份标识"
+            const hueOffsets = new Float32Array(PARTICLE_COUNT);
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                hueOffsets[i] = Math.random();
+            }
+            geometry.setAttribute('hueOffset', new THREE.BufferAttribute(hueOffsets, 1));
+
+            shaderMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:           { value: 0 },
+                    uColorMode:      { value: 1 },
+                    uSingleColor:    { value: new THREE.Color('#00ffcc') },
+                    uFlowSpeed:      { value: 0.15 },
+                    uSize:           { value: 0.25 },
+                    uPaletteColors:  { value: [
+                        new THREE.Color('#ff006e'),
+                        new THREE.Color('#ffbe0b'),
+                        new THREE.Color('#00ffcc'),
+                        new THREE.Color('#3a86ff'),
+                        new THREE.Color('#8338ec')
+                    ]},
+                    uPaletteSize:    { value: 3 },
+                },
+                vertexShader:   VERTEX_SHADER,
+                fragmentShader: FRAGMENT_SHADER,
                 transparent: true,
                 blending: THREE.AdditiveBlending,
                 depthWrite: false,
-                sizeAttenuation: true
             });
 
-            particleSystem = new THREE.Points(geometry, material);
+            particleSystem = new THREE.Points(geometry, shaderMaterial);
             particleSystem.frustumCulled = false;
             scene.add(particleSystem);
 
@@ -357,12 +492,119 @@
             });
         }
 
-        function setupColorPicker() {
-            const colorInput = $('#particle-color');
+        function setupColorModes() {
+            const modeButtons = document.querySelectorAll('.btn-mode');
+            const rainbowControls = document.getElementById('rainbow-controls');
+            const paletteControls = document.getElementById('palette-controls');
+            const singleControls = document.getElementById('single-color-controls');
+            const paletteStrip = document.getElementById('palette-strip');
+            const btnAdd = document.getElementById('btn-add-color');
+            const btnRemove = document.getElementById('btn-remove-color');
+            const flowSlider = document.getElementById('flow-speed');
+            const flowVal = document.getElementById('flow-speed-val');
+            const colorInput = document.getElementById('particle-color');
+            const colorHex = document.getElementById('color-hex');
+
+            let paletteCount = 3;
+            const MAX_COLORS = 5;
+            const MIN_COLORS = 1;
+            const DEFAULT_PALETTE = ['#ff006e', '#ffbe0b', '#00ffcc', '#3a86ff', '#8338ec'];
+
+            const panels = { rainbow: rainbowControls, palette: paletteControls, single: singleControls };
+
+            function updatePaletteUI() {
+                const items = paletteStrip.querySelectorAll('.palette-color-item');
+                items.forEach((item, i) => {
+                    item.style.display = i < paletteCount ? '' : 'none';
+                });
+                if (shaderMaterial) {
+                    shaderMaterial.uniforms.uPaletteSize.value = paletteCount;
+                }
+                btnAdd.disabled = paletteCount >= MAX_COLORS;
+                btnRemove.disabled = paletteCount <= MIN_COLORS;
+            }
+
+            function addColor() {
+                if (paletteCount >= MAX_COLORS) return;
+
+                // 检查是否已有该索引的 DOM 元素
+                let item = paletteStrip.querySelector(`.palette-color-item[data-index="${paletteCount}"]`);
+                if (!item) {
+                    item = document.createElement('div');
+                    item.className = 'palette-color-item';
+                    item.setAttribute('data-index', paletteCount);
+                    const input = document.createElement('input');
+                    input.type = 'color';
+                    input.className = 'palette-dot';
+                    input.value = DEFAULT_PALETTE[paletteCount];
+                    input.setAttribute('data-index', paletteCount);
+                    input.addEventListener('input', function() {
+                        shaderMaterial.uniforms.uPaletteColors.value[parseInt(this.dataset.index)].set(this.value);
+                    });
+                    item.appendChild(input);
+                    paletteStrip.appendChild(item);
+                }
+                shaderMaterial.uniforms.uPaletteColors.value[paletteCount].set(DEFAULT_PALETTE[paletteCount]);
+                paletteCount++;
+                updatePaletteUI();
+            }
+
+            function removeColor() {
+                if (paletteCount <= MIN_COLORS) return;
+                paletteCount--;
+                updatePaletteUI();
+            }
+
+            // 模式切换
+            modeButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    modeButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const mode = btn.dataset.mode;
+
+                    Object.entries(panels).forEach(([key, el]) => {
+                        el.style.display = (key === mode) ? '' : 'none';
+                    });
+
+                    switch (mode) {
+                        case 'single':
+                            shaderMaterial.uniforms.uColorMode.value = 0;
+                            break;
+                        case 'rainbow':
+                            shaderMaterial.uniforms.uColorMode.value = 1;
+                            break;
+                        case 'palette':
+                            shaderMaterial.uniforms.uColorMode.value = 2;
+                            break;
+                    }
+                });
+            });
+
+            // 彩虹流速滑块
+            flowSlider.addEventListener('input', () => {
+                const val = parseFloat(flowSlider.value);
+                flowVal.textContent = val.toFixed(2);
+                shaderMaterial.uniforms.uFlowSpeed.value = val;
+            });
+
+            // 调色板颜色选择器（初始的3个）
+            paletteStrip.querySelectorAll('.palette-dot').forEach(dot => {
+                dot.addEventListener('input', function() {
+                    shaderMaterial.uniforms.uPaletteColors.value[parseInt(this.dataset.index)].set(this.value);
+                });
+            });
+
+            // 增减按钮
+            btnAdd.addEventListener('click', addColor);
+            btnRemove.addEventListener('click', removeColor);
+
+            // 单色选择器
             colorInput.addEventListener('input', function() {
                 colorHex.textContent = this.value;
-                particleSystem.material.color.set(this.value);
+                shaderMaterial.uniforms.uSingleColor.value.set(this.value);
             });
+
+            updatePaletteUI();
         }
 
         function setupSizeSlider() {
@@ -370,7 +612,7 @@
             sizeInput.addEventListener('input', function() {
                 const val = this.value;
                 sizeVal.textContent = val;
-                particleSystem.material.size = parseFloat(val);
+                shaderMaterial.uniforms.uSize.value = parseFloat(val);
             });
         }
 
@@ -541,6 +783,9 @@
 
             const dt = Math.min(clock.getDelta(), 0.1); // 防止螺旋式崩溃
 
+            // 0. 颜色流动时间推进
+            shaderMaterial.uniforms.uTime.value += dt;
+
             // 1. 平滑缓动响应手势数值
             currentSpread += (targetSpread - currentSpread) * lerpFactor(8, dt);
             cam.curDist += (cam.targetDist - cam.curDist) * lerpFactor(6, dt);
@@ -665,7 +910,7 @@
 
         // ---- 事件绑定 ----
         setupShapeButtons();
-        setupColorPicker();
+        setupColorModes();
         setupSizeSlider();
         setupRotationSpeedSlider();
         setupFullscreenButton();
