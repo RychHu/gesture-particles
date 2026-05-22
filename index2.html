@@ -13,7 +13,13 @@
         #webcam { transform: scaleX(-1); position: absolute; bottom: 20px; left: 20px; width: 160px; height: 120px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.2); z-index: 10; object-fit: cover; display: none; }
 
         /* 现代极简 UI 面板 */
-        #ui-panel { position: absolute; top: 20px; right: 20px; z-index: 10; background: rgba(10, 10, 15, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); padding: 24px; border-radius: 16px; width: 280px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+        #ui-panel { position: absolute; top: 20px; right: 20px; z-index: 10; background: rgba(10, 10, 15, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); padding: 24px; border-radius: 16px; width: 280px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); transition: opacity 0.3s, transform 0.3s, visibility 0.3s; }
+        #ui-panel.hidden { opacity: 0; transform: translateX(20px); visibility: hidden; pointer-events: none; }
+
+        /* 控制台折叠按钮 */
+        #btn-toggle-panel { position: absolute; top: 24px; right: 310px; z-index: 11; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: rgba(10, 10, 15, 0.7); backdrop-filter: blur(8px); color: rgba(255,255,255,0.7); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.3s; }
+        #btn-toggle-panel:hover { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.4); }
+        #btn-toggle-panel.shifted { right: 20px; }
         h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; letter-spacing: 1px; color: rgba(255,255,255,0.9); text-transform: uppercase; }
         .control-group { margin-bottom: 20px; }
         label { display: block; font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 8px; }
@@ -85,6 +91,8 @@
             #status-tip { font-size: 12px; bottom: 12px; }
             #single-color-controls .color-picker-wrapper { gap: 16px; }
             #single-color-controls input[type="color"] { width: 44px; height: 44px; }
+            #btn-toggle-panel { top: 12px; right: auto; left: 12px; width: 40px; height: 40px; font-size: 18px; }
+            #btn-toggle-panel.shifted { left: 12px; right: auto; }
         }
     </style>
 </head>
@@ -102,6 +110,9 @@
 
     <!-- 错误提示 -->
     <div id="error-toast"></div>
+
+    <!-- UI 面板折叠按钮 -->
+    <button id="btn-toggle-panel" aria-label="切换控制台">☰</button>
 
     <div id="ui-panel">
         <h3>星尘控制台</h3>
@@ -655,6 +666,25 @@
             });
         }
 
+        function setupTogglePanel() {
+            const panel = document.getElementById('ui-panel');
+            const btn = document.getElementById('btn-toggle-panel');
+            let visible = true;
+
+            btn.addEventListener('click', () => {
+                visible = !visible;
+                if (visible) {
+                    panel.classList.remove('hidden');
+                    btn.classList.remove('shifted');
+                    btn.textContent = '☰';
+                } else {
+                    panel.classList.add('hidden');
+                    btn.classList.add('shifted');
+                    btn.textContent = '☰';
+                }
+            });
+        }
+
         function updateCamPos() {
             camera.position.x = 0;
             camera.position.y = 0;
@@ -936,6 +966,7 @@
         setupSizeSlider();
         setupRotationSpeedSlider();
         setupFullscreenButton();
+        setupTogglePanel();
 
         // 启动按钮
         const startBtn = document.getElementById('start-btn');
