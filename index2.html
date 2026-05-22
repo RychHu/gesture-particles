@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Stardust Creator - 3D 粒子手势交互系统</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background: #050508; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; color: #fff; }
-        #canvas-container { width: 100%; height: 100%; position: absolute; z-index: 1; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #050508; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; color: #fff; touch-action: manipulation; -webkit-overflow-scrolling: none; overscroll-behavior: none; }
+        #canvas-container { width: 100%; height: 100%; position: absolute; z-index: 1; touch-action: manipulation; }
 
         /* 隐藏的摄像头预览（用于检测） */
         #webcam { transform: scaleX(-1); position: absolute; bottom: 20px; left: 20px; width: 160px; height: 120px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.2); z-index: 10; object-fit: cover; display: none; }
@@ -71,13 +71,20 @@
 
         /* 移动端响应式 */
         @media (max-width: 768px) {
-            #ui-panel { top: auto; bottom: 0; right: 0; width: 100%; border-radius: 16px 16px 0 0; padding: 16px; max-height: 45vh; overflow-y: auto; }
+            #ui-panel { top: auto; bottom: 0; right: 0; width: 100%; border-radius: 16px 16px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px)); max-height: 45vh; overflow-y: auto; }
             h3 { font-size: 14px; margin-bottom: 10px; }
             .control-group { margin-bottom: 12px; }
             .btn-shape { padding: 12px 8px; font-size: 12px; min-height: 44px; }
             .btn-action { min-height: 44px; }
+            .btn-mode { min-height: 44px; padding: 10px 6px; font-size: 13px; }
+            .palette-dot { width: 38px; height: 38px; }
+            .btn-palette-action { width: 36px; height: 36px; font-size: 18px; }
             #webcam { bottom: auto; top: 10px; left: 10px; width: 100px; height: 75px; }
             .cam-mirror-badge { bottom: auto; top: 92px; left: 10px; }
+            #start-btn { width: 80%; padding: 18px 36px; font-size: 20px; }
+            #status-tip { font-size: 12px; bottom: 12px; }
+            #single-color-controls .color-picker-wrapper { gap: 16px; }
+            #single-color-controls input[type="color"] { width: 44px; height: 44px; }
         }
     </style>
 </head>
@@ -192,10 +199,12 @@
         }
 
         // ---- 1. 全局变量与配置 ----
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 768;
         const clock = new THREE.Clock();
         let scene, camera, renderer, particleSystem, starField, shaderMaterial;
         const PARTICLE_COUNT = (function() {
             const cores = navigator.hardwareConcurrency || 4;
+            if (isMobile) return Math.min(cores <= 4 ? 6000 : 8000, 8000);
             if (cores <= 2) return 6000;
             if (cores <= 4) return 10000;
             return 15000;
@@ -317,6 +326,10 @@
             renderer.domElement.addEventListener('webglcontextlost', handleContextLost, false);
             container.appendChild(renderer.domElement);
 
+            // 阻止移动端默认触摸手势（页面滚动/缩放）干扰画布交互
+            renderer.domElement.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
+            renderer.domElement.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+
             // 创建星空背景
             createStarField();
 
@@ -365,7 +378,7 @@
         }
 
         function createStarField() {
-            const starCount = 2000;
+            const starCount = isMobile ? 800 : 2000;
             const starsGeo = new THREE.BufferGeometry();
             const starsPos = new Float32Array(starCount * 3);
             for (let i = 0; i < starCount * 3; i += 3) {
@@ -626,10 +639,18 @@
 
         function setupFullscreenButton() {
             $('#btn-fullscreen').addEventListener('click', function() {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen().catch(() => {});
+                const el = document.documentElement;
+                const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+                const rfs = el.requestFullscreen || el.webkitRequestFullscreen;
+                const efs = document.exitFullscreen || document.webkitExitFullscreen;
+                if (!fsEl) {
+                    if (rfs) {
+                        rfs.call(el).catch(() => {});
+                    }
                 } else {
-                    document.exitFullscreen().catch(() => {});
+                    if (efs) {
+                        efs.call(document).catch(() => {});
+                    }
                 }
             });
         }
@@ -728,8 +749,9 @@
                 onFrame: async () => {
                     await hands.send({ image: videoElement });
                 },
-                width: 640,
-                height: 480
+                width: isMobile ? 320 : 640,
+                height: isMobile ? 240 : 480,
+                facingMode: 'user'
             });
             cameraUtils.start().then(() => {
                 statusTip.textContent = "手势系统就绪：请在摄像头前展示单手";
